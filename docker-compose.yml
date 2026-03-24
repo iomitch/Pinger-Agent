@@ -1,0 +1,12 @@
+services:
+    agent:
+          build: .
+          container_name: pinger-agent
+          restart: unless-stopped
+          cap_add:
+            - NET_RAW
+          environment:
+            PINGER_SERVER_URL: ${PINGER_SERVER_URL}
+            PINGER_API_KEY: ${PINGER_API_KEY}
+            LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
+            TRACEROUTE_INTERVAL_SECONDS: ${AGENT_TRACEROUTE_INTERVAL:-120}
