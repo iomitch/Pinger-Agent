@@ -114,13 +114,29 @@ class AgentScheduler:
     async def _traceroute_loop(self) -> None:
         # Wait for jobs to load
         await asyncio.sleep(10)
+        traceroute_available = None  # None = untested, True/False = detected
 
         while not self._stop.is_set():
+            if traceroute_available is False:
+                # Traceroute doesn't work in this environment — stop trying
+                await asyncio.sleep(3600)
+                continue
+
             for job in list(self._jobs):
                 if self._stop.is_set():
                     break
                 try:
                     hops = await run_traceroute(job["target"], max_hops=settings.traceroute_max_hops)
+
+                    # First run: check if traceroute actually works
+                    if traceroute_available is None:
+                        has_real_hops = any(not h.get("timeout") for h in hops)
+                        if not has_real_hops:
+                            traceroute_available = False
+                            logger.info("Traceroute not available in this environment (all hops timed out), disabling")
+                            break
+                        traceroute_available = True
+
                     if hops:
                         await self._client.post_traceroute({
                             "host_id": job["host_id"],
@@ -129,6 +145,10 @@ class AgentScheduler:
                         })
                         logger.debug("Traceroute for %s: %d hops", job["target"], len(hops))
                 except Exception:
+                    if traceroute_available is None:
+                        traceroute_available = False
+                        logger.info("Traceroute not available in this environment, disabling")
+                        break
                     logger.debug("Traceroute failed for %s", job["target"], exc_info=True)
 
             await asyncio.sleep(settings.traceroute_interval_seconds)
