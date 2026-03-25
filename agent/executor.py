@@ -135,10 +135,13 @@ async def run_traceroute(target: str, max_hops: int = 30) -> list[dict]:
             if hop:
                 raw_hops.append(hop)
 
-        # Filter out Docker/private/local hops and renumber
+        # Filter out internal IPs and timeout-only hops, then renumber
         hops = []
         for hop in raw_hops:
             if _is_internal_ip(hop.get("ip_address")):
+                continue
+            # Skip hops that are pure timeouts (no IP, no latency)
+            if hop.get("timeout") and not hop.get("ip_address"):
                 continue
             hop["hop"] = len(hops) + 1
             hops.append(hop)
