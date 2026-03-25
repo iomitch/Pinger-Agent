@@ -1,0 +1,71 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - cron
+
+write_files:
+  - path: /opt/pinger-agent/.env
+    permissions: "0600"
+    content: |
+      PINGER_SERVER_URL=__SERVER_URL__
+      PINGER_API_KEY=__API_KEY__
+
+  - path: /opt/pinger-agent/update.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -e
+      cd /opt/pinger-agent/repo
+
+      # Fetch latest
+      git fetch origin main --quiet
+      LOCAL=$(git rev-parse HEAD)
+      REMOTE=$(git rev-parse origin/main)
+
+      if [ "$LOCAL" = "$REMOTE" ]; then
+        exit 0
+      fi
+
+      echo "$(date): Updating from $LOCAL to $REMOTE"
+      git reset --hard origin/main
+
+      # Rebuild and restart
+      docker compose build --quiet
+      docker compose up -d
+
+      echo "$(date): Update complete"
+
+  - path: /etc/cron.d/pinger-agent-update
+    permissions: "0644"
+    content: |
+      */5 * * * * root /opt/pinger-agent/update.sh >> /var/log/pinger-agent-update.log 2>&1
+
+runcmd:
+  # Install Docker
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - systemctl enable docker
+  - systemctl start docker
+
+  # Clone the repo
+  - git clone https://github.com/iomitch/Pinger-Agent.git /opt/pinger-agent/repo
+
+  # Copy .env into repo
+  - cp /opt/pinger-agent/.env /opt/pinger-agent/repo/.env
+
+  # Build and start
+  - cd /opt/pinger-agent/repo && docker compose build && docker compose up -d
+
+  # Enable cron
+  - systemctl enable cron
+  - systemctl start cron
