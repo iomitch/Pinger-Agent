@@ -1,4 +1,5 @@
 import logging
+import subprocess
 
 import httpx
 
@@ -11,11 +12,37 @@ MAX_RETRIES = 3
 RETRY_BACKOFF = 2.0
 
 
+def _get_git_hash() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+        ).strip()[:40]
+    except Exception:
+        return ""
+
+
+def _get_public_ip() -> str:
+    try:
+        resp = httpx.get("https://ifconfig.me/ip", timeout=5.0)
+        return resp.text.strip()[:64]
+    except Exception:
+        return ""
+
+
 class AgentClient:
     def __init__(self) -> None:
+        agent_headers = {"X-Api-Key": settings.pinger_api_key}
+        git_hash = _get_git_hash()
+        public_ip = _get_public_ip()
+        if git_hash:
+            agent_headers["X-Agent-Version"] = git_hash
+        if public_ip:
+            agent_headers["X-Agent-Ip"] = public_ip
+        logger.info("Agent version=%s, public_ip=%s", git_hash[:8] or "unknown", public_ip or "unknown")
+
         self._client = httpx.AsyncClient(
             base_url=settings.pinger_server_url,
-            headers={"X-Api-Key": settings.pinger_api_key},
+            headers=agent_headers,
             timeout=TIMEOUT,
         )
 
