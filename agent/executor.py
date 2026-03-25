@@ -1,12 +1,20 @@
 import asyncio
 import ipaddress
+import logging
 import re
+import socket
+import time
+
+logger = logging.getLogger(__name__)
 
 PING_RE = re.compile(r"time[=<]([0-9.]+)")
 
 TRACEROUTE_LINE_RE = re.compile(r"^\s*(\d+)\s+(.*)$")
 IP_RE = re.compile(r"\(([\dA-Fa-f:.]+)\)")
 LATENCY_RE = re.compile(r"(\d+(?:\.\d+)?)\s*ms")
+
+# Track whether ICMP works in this environment
+_icmp_available: bool | None = None
 
 
 def _is_internal_ip(ip: str | None) -> bool:
@@ -20,7 +28,8 @@ def _is_internal_ip(ip: str | None) -> bool:
         return False
 
 
-async def ping_target(target: str) -> tuple[bool, float | None, str | None]:
+async def _icmp_ping(target: str) -> tuple[bool, float | None, str | None]:
+    """ICMP ping using the system ping command."""
     try:
         process = await asyncio.create_subprocess_exec(
             "ping", "-c", "1", "-W", "1", target,
@@ -41,6 +50,56 @@ async def ping_target(target: str) -> tuple[bool, float | None, str | None]:
         return False, None, "ping executable not found"
     except Exception as exc:
         return False, None, str(exc)
+
+
+async def _tcp_ping(target: str, ports: tuple[int, ...] = (443, 80)) -> tuple[bool, float | None, str | None]:
+    """TCP connect ping — measures time to establish a TCP connection."""
+    # Resolve hostname first
+    try:
+        ip = socket.gethostbyname(target)
+    except socket.gaierror:
+        return False, None, f"DNS resolution failed for {target}"
+
+    for port in ports:
+        try:
+            start = time.monotonic()
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, port), timeout=2.0,
+            )
+            elapsed = (time.monotonic() - start) * 1000  # ms
+            writer.close()
+            await writer.wait_closed()
+            return True, round(elapsed, 2), None
+        except (asyncio.TimeoutError, OSError):
+            continue
+
+    return False, None, f"TCP connect failed on ports {ports}"
+
+
+async def ping_target(target: str) -> tuple[bool, float | None, str | None]:
+    """Ping with automatic ICMP → TCP fallback."""
+    global _icmp_available
+
+    # First call: test if ICMP works
+    if _icmp_available is None:
+        success, latency, error = await _icmp_ping(target)
+        if success:
+            _icmp_available = True
+            return success, latency, error
+        # ICMP failed — try TCP to distinguish "host down" from "ICMP blocked"
+        tcp_success, tcp_latency, _ = await _tcp_ping(target)
+        if tcp_success:
+            # Host is reachable but ICMP is blocked — switch to TCP mode
+            _icmp_available = False
+            logger.info("ICMP blocked in this environment, switching to TCP ping")
+            return tcp_success, tcp_latency, None
+        # Both failed — host is probably down, stay in probe mode
+        return False, None, error
+
+    if _icmp_available:
+        return await _icmp_ping(target)
+    else:
+        return await _tcp_ping(target)
 
 
 async def run_traceroute(target: str, max_hops: int = 30) -> list[dict]:
