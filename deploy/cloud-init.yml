@@ -35,7 +35,8 @@ write_files:
       echo "$(date): Updating from $LOCAL to $REMOTE"
       git reset --hard origin/main
 
-      # Rebuild and restart
+      # Rebuild and restart with git hash
+      export GIT_HASH=$(git rev-parse HEAD)
       docker compose build --quiet
       docker compose up -d
 

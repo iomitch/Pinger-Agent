@@ -13,12 +13,21 @@ RETRY_BACKOFF = 2.0
 
 
 def _get_git_hash() -> str:
+    # Try git first (works on VMs with the repo cloned)
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
         ).strip()[:40]
     except Exception:
-        return ""
+        pass
+    # Fall back to VERSION file baked into Docker image
+    try:
+        v = open("/srv/agent/VERSION").read().strip()
+        if v and v != "unknown":
+            return v
+    except Exception:
+        pass
+    return ""
 
 
 def _get_public_ip() -> str:

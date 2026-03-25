@@ -1,6 +1,9 @@
 services:
     agent:
-          build: .
+          build:
+            context: .
+            args:
+              GIT_HASH: ${GIT_HASH:-unknown}
           container_name: pinger-agent
           restart: unless-stopped
           cap_add:

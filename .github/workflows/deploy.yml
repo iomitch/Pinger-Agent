@@ -29,6 +29,7 @@ jobs:
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.IMAGE_NAME }}:latest \
             --image ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --build-arg GIT_HASH=${{ github.sha }} \
             .
 
       - name: Deploy East US

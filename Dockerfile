@@ -17,6 +17,10 @@ RUN groupadd --gid 1000 pinger \
 
 COPY . .
 
+# Bake git hash into the image (passed as build arg)
+ARG GIT_HASH=unknown
+RUN echo "${GIT_HASH}" > /srv/agent/VERSION
+
 RUN chown -R pinger:pinger /srv/agent
 
 # setcap so ping/traceroute work as non-root
