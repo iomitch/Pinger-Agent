@@ -52,8 +52,13 @@ async def _icmp_ping(target: str) -> tuple[bool, float | None, str | None]:
         return False, None, str(exc)
 
 
-async def _tcp_ping(target: str, ports: tuple[int, ...] = (443, 80)) -> tuple[bool, float | None, str | None]:
-    """TCP connect ping — measures time to establish a TCP connection."""
+async def _tcp_ping(target: str, ports: tuple[int, ...] = (443, 80, 22, 53)) -> tuple[bool, float | None, str | None]:
+    """TCP connect ping — measures round-trip time via TCP handshake or rejection.
+
+    A connection refused (RST) response is still a valid latency measurement —
+    it proves the host is reachable and gives us the round-trip time.
+    Only a timeout means the host is truly unreachable.
+    """
     # Resolve hostname first
     try:
         ip = socket.gethostbyname(target)
@@ -70,7 +75,18 @@ async def _tcp_ping(target: str, ports: tuple[int, ...] = (443, 80)) -> tuple[bo
             writer.close()
             await writer.wait_closed()
             return True, round(elapsed, 2), None
-        except (asyncio.TimeoutError, OSError):
+        except ConnectionRefusedError:
+            # Connection refused = host is alive, port just isn't open
+            # The round-trip time is still valid
+            elapsed = (time.monotonic() - start) * 1000
+            return True, round(elapsed, 2), None
+        except asyncio.TimeoutError:
+            continue
+        except OSError as exc:
+            # Network unreachable, host unreachable, etc. — try next port
+            if "Connection refused" in str(exc):
+                elapsed = (time.monotonic() - start) * 1000
+                return True, round(elapsed, 2), None
             continue
 
     return False, None, f"TCP connect failed on ports {ports}"
